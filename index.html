@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SIM Roller</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 [hidden] { display: none !important; }
@@ -43,6 +44,9 @@ header { max-width:1100px; margin:0 auto 22px; display:flex; justify-content:spa
 .balance .val { color:var(--accent); }
 .xp-badge { padding:8px 12px; background:var(--card); border:1px solid var(--border); border-radius:12px; font-weight:700; font-size:12px; display:flex; flex-direction:column; align-items:center; line-height:1.2; }
 .xp-badge small { font-size:9px; color:var(--text-dim); text-transform:uppercase; letter-spacing:1px; }
+.online-badge { display:inline-flex; align-items:center; gap:6px; padding:8px 12px; background:var(--card); border:1px solid var(--border); border-radius:12px; font-weight:700; font-size:13px; font-variant-numeric:tabular-nums; }
+.online-dot { width:8px; height:8px; border-radius:50%; background:#22c55e; box-shadow:0 0 8px #22c55e; animation:onlinePulse 1.8s ease-in-out infinite; }
+@keyframes onlinePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(1.25)} }
 
 .icon-btn { width:42px; height:42px; border-radius:12px; background:var(--card); border:1px solid var(--border); color:var(--text); cursor:pointer; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:4px; padding:0; transition:background .2s; }
 .icon-btn:hover { background:var(--card-hover); }
@@ -470,6 +474,8 @@ button:disabled { opacity:.4; cursor:not-allowed; }
   .logo { font-size:14px; }
   .balance { padding:7px 10px; font-size:11px; }
   .xp-badge { padding:6px 8px; font-size:10px; }
+  .online-badge { padding:6px 9px; font-size:11px; }
+  .online-dot { width:6px; height:6px; }
   .icon-btn { width:38px; height:38px; }
   button { padding:12px 20px; font-size:14px; }
   .reel { width:72px; height:92px; font-size:42px; }
@@ -495,6 +501,10 @@ button:disabled { opacity:.4; cursor:not-allowed; }
 <header>
   <div class="logo">📱 SIM ROLLER</div>
   <div class="header-right">
+    <div class="online-badge" title="Игроков онлайн">
+      <span class="online-dot"></span>
+      <b id="onlineCount">0</b>
+    </div>
     <div class="xp-badge">LVL <b id="passLvlHdr">0</b><small>XP <span id="xpHdr">0</span></small></div>
     <div class="balance">💰 <span class="val" id="balance">5 000</span> ₽</div>
     <button class="icon-btn" id="menuBtn" aria-label="Меню"><span></span><span></span><span></span></button>
@@ -862,7 +872,7 @@ button:disabled { opacity:.4; cursor:not-allowed; }
     <div class="info-intro"><b>SIM Roller</b> — игра про кручение телефонных номеров. Чем красивее номер — тем выше его редкость и цена. Собирай коллекцию, выполняй задания, играй в мини-игры и развивайся!</div>
     <div class="about-card"><div class="about-icon">👨‍💻</div><div class="about-body"><div class="about-label">Автор / Разработчик</div><div class="about-value">Yg4s</div><div class="about-note">Разработчик игры SIM Roller</div></div></div>
     <div class="about-card"><div class="about-icon">📅</div><div class="about-body"><div class="about-label">Год выпуска</div><div class="about-value">2026</div><div class="about-note">Год активной разработки и поддержки проекта</div></div></div>
-    <div class="about-card"><div class="about-icon">🔄</div><div class="about-body"><div class="about-label">Последнее обновление</div><div class="about-value">15.10.2026</div><div class="about-note">Раздел «Автопродажа», случайный оператор за 500 ₽, отдельный ряд операторов</div></div></div>
+    <div class="about-card"><div class="about-icon">🔄</div><div class="about-body"><div class="about-label">Последнее обновление</div><div class="about-value">16.10.2026</div><div class="about-note">Онлайн-счётчик игроков через Supabase Realtime</div></div></div>
     <div class="about-footer">© <b>Yg4s</b>, 2026. Все права защищены.</div>
   </section>
 
@@ -1084,6 +1094,68 @@ button:disabled { opacity:.4; cursor:not-allowed; }
 <div class="toast" id="toast"></div>
 
 <script>
+/* ============ SUPABASE (ОНЛАЙН-СЧЁТЧИК) ============ */
+const SUPABASE_URL = 'ВСТАВЬ_СЮДА_URL';
+const SUPABASE_ANON_KEY = 'ВСТАВЬ_СЮДА_ANON_KEY';
+
+let __onlineChannel = null;
+function initOnlinePresence() {
+  if (!window.supabase || !SUPABASE_URL.startsWith('https://')) {
+    console.warn('⚠️ Supabase не настроен — онлайн-счётчик отключён');
+    return;
+  }
+  try {
+    const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const clientId = 'u_' + Math.random().toString(36).slice(2, 10);
+
+    __onlineChannel = sb.channel('simroller-online', {
+      config: { presence: { key: clientId } }
+    });
+
+    __onlineChannel.on('presence', { event: 'sync' }, () => {
+      const st = __onlineChannel.presenceState();
+      const count = Object.keys(st).length;
+      const el = document.getElementById('onlineCount');
+      if (el) el.textContent = count;
+    });
+
+    __onlineChannel.on('presence', { event: 'join' }, ({ key, newPresences }) => {
+      console.log('🟢 Онлайн +', newPresences.map(p => p.nick).join(', '));
+    });
+    __onlineChannel.on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+      console.log('🔴 Онлайн -', leftPresences.map(p => p.nick).join(', '));
+    });
+
+    __onlineChannel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        __onlineChannel.track({
+          nick: (typeof activeLogin !== 'undefined' && activeLogin) ? activeLogin : 'Гость',
+          joinedAt: Date.now()
+        });
+      }
+    });
+
+    // Пинг каждые 25 сек, чтобы Presence не «засыпал»
+    setInterval(() => {
+      if (__onlineChannel) {
+        __onlineChannel.track({
+          nick: (typeof activeLogin !== 'undefined' && activeLogin) ? activeLogin : 'Гость',
+          joinedAt: Date.now()
+        }).catch(() => {});
+      }
+    }, 25000);
+
+    // Обновление ника при входе
+    window.__updateOnlineNick = (nick) => {
+      if (__onlineChannel) {
+        __onlineChannel.track({ nick: nick || 'Гость', joinedAt: Date.now() }).catch(() => {});
+      }
+    };
+  } catch(e) {
+    console.warn('Онлайн-счётчик: ошибка инициализации', e);
+  }
+}
+
 /* ============ КОНСТАНТЫ ============ */
 const ROLL_BASE_COST = 1000;
 const MAX_SLOTS = 5;
@@ -1102,7 +1174,6 @@ const TG_LINK = 'https://t.me/+DS_aZuRLjqllYjcy';
 const TG_REWARD = 50000;
 const ADMIN_CODE = '23331';
 
-/* ===== 6 ОПЕРАТОРОВ + СЛУЧАЙНЫЙ ===== */
 const OPERATORS = [
   { id:'mts',     name:'МТС',      code:'916', color:'#e30611', icon:'🔴', priceMult:1.00, luckBonus:0, rollCostMult:1.00, desc:'Классика. Стабильная крутка без сюрпризов.' },
   { id:'beeline', name:'Билайн',   code:'963', color:'#ffcc00', icon:'🟡', priceMult:0.95, luckBonus:0, rollCostMult:0.95, desc:'Дешёвая крутка, но и цены чуть ниже.' },
@@ -1492,7 +1563,6 @@ function getRarity(digits) {
   return r;
 }
 
-/* ===== БОНУС ЗА «КРАСОТУ» НОМЕРА ===== */
 function getBeautyBonus(digits) {
   let bonus = 0;
   if (digits.startsWith('999')) bonus += 0.10;
@@ -3556,6 +3626,7 @@ function enterAccount(login) {
   switchMinigame(state.currentMg);
   hideAuthScreen();
   updateAccountUI();
+  if (window.__updateOnlineNick) window.__updateOnlineNick(activeLogin);
   if (!state.tutorialDone) setTimeout(openTutorial, 400);
 }
 function updateAccountUI() {
@@ -3576,6 +3647,7 @@ function doLogout() {
   accountsSave();
   activeLogin = null;
   $('accountModal').classList.remove('open');
+  if (window.__updateOnlineNick) window.__updateOnlineNick('Гость');
   showAuthScreen();
 }
 function doDeleteAccount() {
@@ -3656,6 +3728,9 @@ if (accountsData.lastLogin && accountsData.accounts[accountsData.lastLogin]) {
 } else {
   showAuthScreen();
 }
+
+// Запускаем онлайн-счётчик (Supabase Realtime)
+initOnlinePresence();
 </script>
 </body>
 </html>
